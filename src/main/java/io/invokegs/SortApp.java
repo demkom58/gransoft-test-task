@@ -2,9 +2,10 @@ package io.invokegs;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.ArrayDeque;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.Random;
-import java.util.Stack;
 
 /// # Test Task Assignment
 ///
@@ -34,13 +35,17 @@ import java.util.Stack;
 public class SortApp extends JFrame {
     private static final Color BLUE_COLOR = Color.decode("#4472c4");
     private static final Color GREEN_COLOR = Color.decode("#00b050");
+    private static final int MAX_NUMBER_VALUE = 1000;
+    private static final int MIN_SPECIAL_NUMBER = 30;
+    private static final int ROWS_PER_COLUMN = 10;
+    private static final int MAX_NUMBER_COUNT = 1000;
+    private static final int SORT_DELAY = 300;
 
+    private final Random random = new Random();
     private final JPanel mainPanel = new JPanel(new CardLayout());
     private final JPanel introPanel = new JPanel();
     private final JPanel sortPanel = new JPanel();
-    private JButton enterButton;
     private JButton sortButton;
-    private JButton resetButton;
     private JTextField inputField;
     private Integer[] numbers;
     private JButton[] numberButtons;
@@ -48,14 +53,16 @@ public class SortApp extends JFrame {
     private Timer timer;
     private boolean descending = false;
 
-    private JScrollPane scrollPane;
     private JPanel numbersPanel;
+
+    private final Deque<int[]> swapDeque = new ArrayDeque<>();
+    private Integer[] planningArray;
 
     public SortApp() {
         setTitle("Sort Application");
-        setSize(600, 460);
+        setSize(800, 600);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setLocationRelativeTo(null); // Center the window
+        setLocationRelativeTo(null);
 
         setupIntroScreen();
         setupSortScreen();
@@ -80,51 +87,57 @@ public class SortApp extends JFrame {
         gbc.gridy++;
         introPanel.add(inputField, gbc);
 
-        enterButton = new JButton("Enter");
+        JButton enterButton = createEnterButton();
+        gbc.gridy++;
+        introPanel.add(enterButton, gbc);
+    }
+
+    private JButton createEnterButton() {
+        JButton enterButton = new JButton("Enter");
         enterButton.setBackground(BLUE_COLOR);
         enterButton.setForeground(Color.WHITE);
         enterButton.addActionListener(e -> {
             try {
                 numberCount = Integer.parseInt(inputField.getText().trim());
-                if (numberCount <= 0) {
-                    throw new NumberFormatException();
+                if (numberCount <= 0 || numberCount > MAX_NUMBER_COUNT) {
+                    JOptionPane.showMessageDialog(SortApp.this, "Please enter a number between 1 and " + MAX_NUMBER_COUNT + ".");
+                    return;
                 }
                 showSortScreen();
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(SortApp.this, "Please enter a valid positive number.");
             }
         });
-        gbc.gridy++;
-        introPanel.add(enterButton, gbc);
+        return enterButton;
     }
 
     private void setupSortScreen() {
         sortPanel.setLayout(new BorderLayout());
 
-        // Create number buttons panel
         numbersPanel = new JPanel();
-        scrollPane = new JScrollPane(numbersPanel);
+        JScrollPane scrollPane = new JScrollPane(numbersPanel);
         sortPanel.add(scrollPane, BorderLayout.CENTER);
 
         sortButton = new JButton("Sort");
         sortButton.setBackground(GREEN_COLOR);
         sortButton.setForeground(Color.WHITE);
         sortButton.setSize(100, 50);
-        resetButton = new JButton("Reset");
+
+        JButton resetButton = new JButton("Reset");
         resetButton.setBackground(GREEN_COLOR);
         resetButton.setForeground(Color.WHITE);
         resetButton.setSize(100, 50);
 
         sortButton.addActionListener(e -> {
             if (numbers != null && timer == null) {
-                sortButton.setEnabled(false); // Disable the sort button during sorting
                 descending = !descending;
-                sort(numbers,
-                        descending ? Comparator.reverseOrder() : Comparator.naturalOrder(),
-                        100,
-                        () -> sortButton.setEnabled(true),
-                        this::updateNumbersOnScreen
-                );
+                sortButton.setEnabled(false);
+                swapDeque.clear();
+
+                Comparator<Integer> comparator = descending ? Comparator.reverseOrder() : Comparator.naturalOrder();
+                quickSortPlan(planningArray, 0, planningArray.length - 1, comparator);
+
+                executePlannedSwaps(() -> sortButton.setEnabled(true), this::updateNumbersOnScreen);
             }
         });
 
@@ -136,7 +149,6 @@ public class SortApp extends JFrame {
             showIntroScreen();
         });
 
-        // Create a right side panel with buttons at the top
         JPanel rightPanel = new JPanel(new BorderLayout());
         JPanel buttonPanel = new JPanel();
         buttonPanel.setLayout(new BoxLayout(buttonPanel, BoxLayout.Y_AXIS));
@@ -155,7 +167,7 @@ public class SortApp extends JFrame {
     }
 
     private void showSortScreen() {
-        numbers = generateRandomNumbers();
+        generateRandomNumbers();
         createNumberButtons();
         updateNumbersOnScreen();
         sortButton.setEnabled(true);
@@ -163,52 +175,42 @@ public class SortApp extends JFrame {
         cl.show(mainPanel, "Sort");
     }
 
-    private Integer[] generateRandomNumbers() {
-        Random random = new Random();
-
+    private void generateRandomNumbers() {
         boolean hasLessThanThirty = false;
         numbers = new Integer[numberCount];
         for (int i = 0; i < numberCount; i++) {
-            numbers[i] = random.nextInt(1000) + 1;
-            if (numbers[i] <= 30) hasLessThanThirty = true;
+            numbers[i] = random.nextInt(MAX_NUMBER_VALUE) + 1;
+            if (numbers[i] <= MIN_SPECIAL_NUMBER) hasLessThanThirty = true;
         }
 
         if (!hasLessThanThirty) {
-            numbers[random.nextInt(numberCount)] = random.nextInt(30) + 1;
+            numbers[random.nextInt(numberCount)] = random.nextInt(MIN_SPECIAL_NUMBER) + 1;
         }
 
-        return numbers;
+        planningArray = numbers.clone();
     }
 
     private void createNumberButtons() {
         numbersPanel.removeAll();
         numbersPanel.setLayout(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(5, 5, 5, 5);
-        gbc.fill = GridBagConstraints.NONE;
-        gbc.anchor = GridBagConstraints.NORTHWEST;
-
-        int rowsPerColumn = 10;
         numberButtons = new JButton[numberCount];
 
         for (int i = 0; i < numberCount; i++) {
-            numberButtons[i] = new JButton();
-            numberButtons[i].setPreferredSize(new Dimension(80, 30));
-            numberButtons[i].setBackground(BLUE_COLOR);
-            numberButtons[i].setForeground(Color.WHITE);
-            numberButtons[i].setFocusPainted(false);
-            int index = i;
-            numberButtons[i].addActionListener(e -> onNumberButtonClick(numbers[index]));
+            JButton button = new JButton();
+            button.setPreferredSize(new Dimension(80, 30));
+            button.setBackground(BLUE_COLOR);
+            button.setForeground(Color.WHITE);
+            button.setFocusPainted(false);
 
-            gbc.gridx = i / rowsPerColumn;
-            gbc.gridy = i % rowsPerColumn;
-            numbersPanel.add(numberButtons[i], gbc);
+            Integer number = numbers[i];
+            button.addActionListener(e -> onNumberButtonClick(number));
+
+            numberButtons[i] = button;
         }
 
-        numbersPanel.revalidate();
-        numbersPanel.repaint();
+        updateNumbersOnScreen();
+        updateButtonsInPanel();
     }
-
 
     private void onNumberButtonClick(int number) {
         if (timer != null) {
@@ -216,8 +218,9 @@ public class SortApp extends JFrame {
             return;
         }
 
-        if (number <= 30) {
-            numbers = generateRandomNumbers();
+        if (number <= MIN_SPECIAL_NUMBER) {
+            numberCount = number;
+            generateRandomNumbers();
             createNumberButtons();
             updateNumbersOnScreen();
         } else {
@@ -231,28 +234,66 @@ public class SortApp extends JFrame {
         }
     }
 
-    private <T> void sort(T[] array, Comparator<T> comparator, int delay,
-                          Runnable onFinish, Runnable onStep) {
+    private void updateButtonsInPanel() {
+        numbersPanel.removeAll();
 
-        Stack<int[]> stack = new Stack<>();
-        stack.push(new int[]{0, array.length - 1});
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.anchor = GridBagConstraints.NORTHWEST;
 
-        timer = new Timer(delay, e -> {
-            if (!stack.isEmpty()) {
-                int[] range = stack.pop();
-                int low = range[0];
-                int high = range[1];
+        for (int i = 0; i < numberButtons.length; i++) {
+            gbc.gridx = i / ROWS_PER_COLUMN;
+            gbc.gridy = i % ROWS_PER_COLUMN;
+            numbersPanel.add(numberButtons[i], gbc);
+        }
 
-                if (low < high) {
-                    int pi = partition(array, low, high, comparator);
+        numbersPanel.revalidate();
+        numbersPanel.repaint();
+    }
 
-                    if (pi + 1 < high) {
-                        stack.push(new int[]{pi + 1, high});
-                    }
-                    if (low < pi - 1) {
-                        stack.push(new int[]{low, pi - 1});
-                    }
+    private <T> void quickSortPlan(T[] array, int low, int high, Comparator<T> comparator) {
+        if (low < high) {
+            int pi = partitionPlan(array, low, high, comparator);
+
+            quickSortPlan(array, low, pi - 1, comparator);
+            quickSortPlan(array, pi + 1, high, comparator);
+        }
+    }
+
+    private <T> int partitionPlan(T[] array, int low, int high, Comparator<T> comparator) {
+        T pivot = array[high];
+        int i = low - 1;
+
+        for (int j = low; j < high; j++) {
+            if (comparator.compare(array[j], pivot) <= 0) {
+                i++;
+                if (i != j) {
+                    swapDeque.add(new int[]{i, j});
+                    swap(array, i, j);
                 }
+            }
+        }
+
+        swapDeque.add(new int[]{i + 1, high});
+        swap(array, i + 1, high);
+
+        return i + 1;
+    }
+
+    private void executePlannedSwaps(Runnable onFinish, Runnable onStep) {
+        timer = new Timer(SORT_DELAY, e -> {
+            if (!swapDeque.isEmpty()) {
+                int[] swapPair = swapDeque.pop();
+                int i = swapPair[0];
+                int j = swapPair[1];
+
+                swap(numbers, i, j);
+                swapButtons(i, j);
+
+                updateButtonsInPanel();
+                highlightSwap(i, j);
+
                 onStep.run();
             } else {
                 ((Timer) e.getSource()).stop();
@@ -264,18 +305,22 @@ public class SortApp extends JFrame {
         timer.start();
     }
 
-    private static <T> int partition(T[] array, int low, int high, Comparator<T> comparator) {
-        T pivot = array[high];
-        int i = low - 1;
+    private void swapButtons(int i, int j) {
+        JButton tempButton = numberButtons[i];
+        numberButtons[i] = numberButtons[j];
+        numberButtons[j] = tempButton;
+    }
 
-        for (int j = low; j < high; j++) {
-            if (comparator.compare(array[j], pivot) <= 0) {
-                i++;
-                swap(array, i, j);
-            }
-        }
-        swap(array, i + 1, high);
-        return i + 1;
+    private void highlightSwap(int i, int j) {
+        numberButtons[i].setBackground(Color.GRAY);
+        numberButtons[j].setBackground(Color.GRAY);
+
+        Timer highlightTimer = new Timer(SORT_DELAY / 2, e -> {
+            numberButtons[i].setBackground(BLUE_COLOR);
+            numberButtons[j].setBackground(BLUE_COLOR);
+        });
+        highlightTimer.setRepeats(false);
+        highlightTimer.start();
     }
 
     private static <T> void swap(T[] array, int i, int j) {
